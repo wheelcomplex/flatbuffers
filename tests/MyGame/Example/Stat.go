@@ -14,12 +14,12 @@ func (rcv *Stat) Init(buf []byte, i flatbuffers.UOffsetT) {
 	rcv._tab.Pos = i
 }
 
-func (rcv *Stat) Id() string {
+func (rcv *Stat) Id() []byte {
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(4))
 	if o != 0 {
-		return rcv._tab.String(o + rcv._tab.Pos)
+		return rcv._tab.ByteVector(o + rcv._tab.Pos)
 	}
-	return ""
+	return nil
 }
 
 func (rcv *Stat) Val() int64 {
@@ -30,7 +30,16 @@ func (rcv *Stat) Val() int64 {
 	return 0
 }
 
-func StatStart(builder *flatbuffers.Builder) { builder.StartObject(2) }
+func (rcv *Stat) Count() uint16 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(8))
+	if o != 0 {
+		return rcv._tab.GetUint16(o + rcv._tab.Pos)
+	}
+	return 0
+}
+
+func StatStart(builder *flatbuffers.Builder) { builder.StartObject(3) }
 func StatAddId(builder *flatbuffers.Builder, id flatbuffers.UOffsetT) { builder.PrependUOffsetTSlot(0, flatbuffers.UOffsetT(id), 0) }
 func StatAddVal(builder *flatbuffers.Builder, val int64) { builder.PrependInt64Slot(1, val, 0) }
+func StatAddCount(builder *flatbuffers.Builder, count uint16) { builder.PrependUint16Slot(2, count, 0) }
 func StatEnd(builder *flatbuffers.Builder) flatbuffers.UOffsetT { return builder.EndObject() }

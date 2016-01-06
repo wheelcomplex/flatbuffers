@@ -27,12 +27,14 @@ namespace FlatBuffers
         protected int bb_pos;
         protected ByteBuffer bb;
 
+        public ByteBuffer ByteBuffer { get { return bb; } }
+
         // Look up a field in the vtable, return an offset into the object, or 0 if the field is not
         // present.
         protected int __offset(int vtableOffset)
         {
             int vtable = bb_pos - bb.GetInt(bb_pos);
-            return vtableOffset < bb.GetShort(vtable) ? bb.GetShort(vtable + vtableOffset) : 0;
+            return vtableOffset < bb.GetShort(vtable) ? (int)bb.GetShort(vtable + vtableOffset) : 0;
         }
 
         // Retrieve the relative offset stored at "offset"
@@ -65,8 +67,23 @@ namespace FlatBuffers
             return offset + bb.GetInt(offset) + sizeof(int);  // data starts after the length
         }
 
+        // Get the data of a vector whoses offset is stored at "offset" in this object as an
+        // ArraySegment&lt;byte&gt;. If the vector is not present in the ByteBuffer,
+        // then a null value will be returned.
+        protected ArraySegment<byte>? __vector_as_arraysegment(int offset) {
+            var o = this.__offset(offset);
+            if (0 == o)
+            {
+                return null;
+            }
+
+            var pos = this.__vector(o);
+            var len = this.__vector_len(o);
+            return new ArraySegment<byte>(this.bb.Data, pos, len);
+        }
+
         // Initialize any Table-derived type to point to the union at the given offset.
-        protected Table __union(Table t, int offset)
+        protected TTable __union<TTable>(TTable t, int offset) where TTable : Table
         {
             offset += bb_pos;
             t.bb_pos = offset + bb.GetInt(offset);
@@ -81,7 +98,7 @@ namespace FlatBuffers
 
             for (var i = 0; i < FlatBufferConstants.FileIdentifierLength; i++)
             {
-                if (ident[i] != (char)bb.Get(bb.position() + sizeof(int) + i)) return false;
+                if (ident[i] != (char)bb.Get(bb.Position + sizeof(int) + i)) return false;
             }
 
             return true;

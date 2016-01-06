@@ -6,7 +6,9 @@ project(FlatBuffers)
 option(FLATBUFFERS_CODE_COVERAGE "Enable the code coverage build option." OFF)
 option(FLATBUFFERS_BUILD_TESTS "Enable the build of tests and samples." ON)
 option(FLATBUFFERS_INSTALL "Enable the installation of targets." ON)
+option(FLATBUFFERS_BUILD_FLATLIB "Enable the build of the flatbuffers library" ON)
 option(FLATBUFFERS_BUILD_FLATC "Enable the build of the flatbuffers compiler" ON)
+option(FLATBUFFERS_BUILD_FLATHASH "Enable the build of flathash" ON)
 
 if(NOT FLATBUFFERS_BUILD_FLATC AND FLATBUFFERS_BUILD_TESTS)
     message(WARNING
@@ -14,26 +16,39 @@ if(NOT FLATBUFFERS_BUILD_FLATC AND FLATBUFFERS_BUILD_TESTS)
     set(FLATBUFFERS_BUILD_TESTS OFF)
 endif()
 
-set(FlatBuffers_Compiler_SRCS
+set(FlatBuffers_Library_SRCS
   include/flatbuffers/flatbuffers.h
+  include/flatbuffers/hash.h
   include/flatbuffers/idl.h
   include/flatbuffers/util.h
+  include/flatbuffers/reflection.h
+  include/flatbuffers/reflection_generated.h
   src/idl_parser.cpp
+  src/idl_gen_text.cpp
+  src/reflection.cpp
+)
+
+set(FlatBuffers_Compiler_SRCS
+  ${FlatBuffers_Library_SRCS}
   src/idl_gen_cpp.cpp
   src/idl_gen_general.cpp
   src/idl_gen_go.cpp
-  src/idl_gen_text.cpp
+  src/idl_gen_js.cpp
+  src/idl_gen_php.cpp
+  src/idl_gen_python.cpp
   src/idl_gen_fbs.cpp
   src/flatc.cpp
 )
 
+set(FlatHash_SRCS
+  include/flatbuffers/hash.h
+  src/flathash.cpp
+)
+
 set(FlatBuffers_Tests_SRCS
-  include/flatbuffers/flatbuffers.h
-  include/flatbuffers/idl.h
-  include/flatbuffers/util.h
-  src/idl_parser.cpp
-  src/idl_gen_text.cpp
+  ${FlatBuffers_Library_SRCS}
   src/idl_gen_fbs.cpp
+  src/idl_gen_general.cpp
   tests/test.cpp
   # file generate by running compiler on tests/monster_test.fbs
   ${CMAKE_CURRENT_BINARY_DIR}/tests/monster_test_generated.h
@@ -48,6 +63,7 @@ set(FlatBuffers_Sample_Binary_SRCS
 
 set(FlatBuffers_Sample_Text_SRCS
   include/flatbuffers/flatbuffers.h
+  include/flatbuffers/hash.h
   include/flatbuffers/idl.h
   include/flatbuffers/util.h
   src/idl_parser.cpp
@@ -63,9 +79,14 @@ set(FlatBuffers_Sample_Text_SRCS
 if(APPLE)
   set(CMAKE_CXX_FLAGS
     "${CMAKE_CXX_FLAGS} -std=c++11 -stdlib=libc++ -Wall -pedantic -Werror -Wextra")
-elseif(CMAKE_COMPILER_IS_GNUCXX OR "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+elseif(CMAKE_COMPILER_IS_GNUCXX)
   set(CMAKE_CXX_FLAGS
-    "${CMAKE_CXX_FLAGS} -std=c++0x -Wall -pedantic -Werror -Wextra")
+    "${CMAKE_CXX_FLAGS} -std=c++0x -Wall -pedantic -Werror -Wextra -Werror=shadow -Wunused-result -Werror=unused-result")
+elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+  set(CMAKE_CXX_FLAGS
+      "${CMAKE_CXX_FLAGS} -std=c++0x -stdlib=libc++ -Wall -pedantic -Werror -Wextra")
+  set(CMAKE_EXE_LINKER_FLAGS
+      "${CMAKE_EXE_LINKER_FLAGS} -lc++abi")
 endif()
 
 if(FLATBUFFERS_CODE_COVERAGE)
@@ -74,10 +95,23 @@ if(FLATBUFFERS_CODE_COVERAGE)
       "${CMAKE_EXE_LINKER_FLAGS} -fprofile-arcs -ftest-coverage")
 endif()
 
+if(BIICODE)
+  include(biicode/cmake/biicode.cmake)
+  return()
+endif()
+
 include_directories(include)
 
+if(FLATBUFFERS_BUILD_FLATLIB)
+add_library(flatbuffers STATIC ${FlatBuffers_Library_SRCS})
+endif()
+
 if(FLATBUFFERS_BUILD_FLATC)
-add_executable(flatc ${FlatBuffers_Compiler_SRCS})
+  add_executable(flatc ${FlatBuffers_Compiler_SRCS})
+endif()
+
+if(FLATBUFFERS_BUILD_FLATHASH)
+  add_executable(flathash ${FlatHash_SRCS})
 endif()
 
 function(compile_flatbuffers_schema_to_cpp SRC_FBS)
@@ -85,7 +119,16 @@ function(compile_flatbuffers_schema_to_cpp SRC_FBS)
   string(REGEX REPLACE "\\.fbs$" "_generated.h" GEN_HEADER ${SRC_FBS})
   add_custom_command(
     OUTPUT ${GEN_HEADER}
-    COMMAND flatc -c -o "${SRC_FBS_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/${SRC_FBS}"
+    COMMAND flatc -c --no-includes --gen-mutable -o "${SRC_FBS_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/${SRC_FBS}"
+    DEPENDS flatc)
+endfunction()
+
+function(compile_flatbuffers_schema_to_binary SRC_FBS)
+  get_filename_component(SRC_FBS_DIR ${SRC_FBS} PATH)
+  string(REGEX REPLACE "\\.fbs$" ".bfbs" GEN_BINARY_SCHEMA ${SRC_FBS})
+  add_custom_command(
+    OUTPUT ${GEN_BINARY_SCHEMA}
+    COMMAND flatc -b --schema -o "${SRC_FBS_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/${SRC_FBS}"
     DEPENDS flatc)
 endfunction()
 
@@ -102,6 +145,9 @@ endif()
 
 if(FLATBUFFERS_INSTALL)
   install(DIRECTORY include/flatbuffers DESTINATION include)
+  if(FLATBUFFERS_BUILD_FLATLIB)
+    install(TARGETS flatbuffers DESTINATION lib)
+  endif()
   if(FLATBUFFERS_BUILD_FLATC)
     install(TARGETS flatc DESTINATION bin)
   endif()
@@ -114,3 +160,5 @@ if(FLATBUFFERS_BUILD_TESTS)
        "${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME flattests COMMAND flattests)
 endif()
+
+include(CMake/BuildFlatBuffers.cmake)

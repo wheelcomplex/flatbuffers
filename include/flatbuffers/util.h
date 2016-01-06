@@ -42,10 +42,8 @@ namespace flatbuffers {
 
 // Convert an integer or floating point value to a string.
 // In contrast to std::stringstream, "char" values are
-// converted to a string of digits.
+// converted to a string of digits, and we don't use scientific notation.
 template<typename T> std::string NumToString(T t) {
-  // to_string() prints different numbers of digits for floats depending on
-  // platform and isn't available on Android, so we use stringstream
   std::stringstream ss;
   ss << t;
   return ss.str();
@@ -56,6 +54,27 @@ template<> inline std::string NumToString<signed char>(signed char t) {
 }
 template<> inline std::string NumToString<unsigned char>(unsigned char t) {
   return NumToString(static_cast<int>(t));
+}
+
+// Special versions for floats/doubles.
+template<> inline std::string NumToString<double>(double t) {
+  // to_string() prints different numbers of digits for floats depending on
+  // platform and isn't available on Android, so we use stringstream
+  std::stringstream ss;
+  // Use std::fixed to surpress scientific notation.
+  ss << std::fixed << t;
+  auto s = ss.str();
+  // Sadly, std::fixed turns "1" into "1.00000", so here we undo that.
+  auto p = s.find_last_not_of('0');
+  if (p != std::string::npos) {
+    s.resize(p + 1);  // Strip trailing zeroes.
+    if (s.back() == '.')
+      s.erase(s.size() - 1, 1);  // Strip '.' if a whole number.
+  }
+  return s;
+}
+template<> inline std::string NumToString<float>(float t) {
+  return NumToString(static_cast<double>(t));
 }
 
 // Convert an integer value to a hexadecimal string.
@@ -71,13 +90,28 @@ inline std::string IntToStringHex(int i, int xdigits) {
   return ss.str();
 }
 
-// Portable implementation of strtoull().
+// Portable implementation of strtoll().
 inline int64_t StringToInt(const char *str, int base = 10) {
+  #ifdef _MSC_VER
+    return _strtoi64(str, nullptr, base);
+  #else
+    return strtoll(str, nullptr, base);
+  #endif
+}
+
+// Portable implementation of strtoull().
+inline int64_t StringToUInt(const char *str, int base = 10) {
   #ifdef _MSC_VER
     return _strtoui64(str, nullptr, base);
   #else
     return strtoull(str, nullptr, base);
   #endif
+}
+
+// Check if file "name" exists.
+inline bool FileExists(const char *name) {
+  std::ifstream ifs(name);
+  return ifs.good();
 }
 
 // Load file "name" into "buf" returning true if successful
@@ -87,8 +121,18 @@ inline int64_t StringToInt(const char *str, int base = 10) {
 inline bool LoadFile(const char *name, bool binary, std::string *buf) {
   std::ifstream ifs(name, binary ? std::ifstream::binary : std::ifstream::in);
   if (!ifs.is_open()) return false;
-  *buf = std::string(std::istreambuf_iterator<char>(ifs),
-                    std::istreambuf_iterator<char>());
+  if (binary) {
+    // The fastest way to read a file into a string.
+    ifs.seekg(0, std::ios::end);
+    (*buf).resize(static_cast<size_t>(ifs.tellg()));
+    ifs.seekg(0, std::ios::beg);
+    ifs.read(&(*buf)[0], (*buf).size());
+  } else {
+    // This is slower, but works correctly on all platforms for text files.
+    std::ostringstream oss;
+    oss << ifs.rdbuf();
+    *buf = oss.str();
+  }
   return !ifs.bad();
 }
 
@@ -128,6 +172,12 @@ static const char *PathSeparatorSet = "/";
 inline std::string StripExtension(const std::string &filepath) {
   size_t i = filepath.find_last_of(".");
   return i != std::string::npos ? filepath.substr(0, i) : filepath;
+}
+
+// Returns the extension, if any.
+inline std::string GetExtension(const std::string &filepath) {
+  size_t i = filepath.find_last_of(".");
+  return i != std::string::npos ? filepath.substr(i + 1) : "";
 }
 
 // Return the last component of the path, after the last separator.
@@ -232,6 +282,33 @@ inline int FromUTF8(const char **in) {
     ucc |= *(*in)++ & 0x3F;  // Grab 6 more bits of the code.
   }
   return ucc;
+}
+
+// Wraps a string to a maximum length, inserting new lines where necessary. Any
+// existing whitespace will be collapsed down to a single space. A prefix or
+// suffix can be provided, which will be inserted before or after a wrapped
+// line, respectively.
+inline std::string WordWrap(const std::string in, size_t max_length,
+                            const std::string wrapped_line_prefix,
+                            const std::string wrapped_line_suffix) {
+  std::istringstream in_stream(in);
+  std::string wrapped, line, word;
+
+  in_stream >> word;
+  line = word;
+
+  while (in_stream >> word) {
+    if ((line.length() + 1 + word.length() + wrapped_line_suffix.length()) <
+        max_length) {
+      line += " " + word;
+    } else {
+      wrapped += line + wrapped_line_suffix + "\n";
+      line = wrapped_line_prefix + word;
+    }
+  }
+  wrapped += line;
+
+  return wrapped;
 }
 
 }  // namespace flatbuffers
