@@ -17,6 +17,7 @@
 #include "flatbuffers/flatbuffers.h"
 #include "flatbuffers/idl.h"
 #include "flatbuffers/util.h"
+#include <limits>
 
 static void Error(const std::string &err, bool usage = false,
                   bool show_exe_name = true);
@@ -117,7 +118,7 @@ static void Error(const std::string &err, bool usage, bool show_exe_name) {
       "                  This may crash flatc given a mismatched schema.\n"
       "  --proto         Input is a .proto, translate to .fbs.\n"
       "  --schema        Serialize schemas instead of JSON (use with -b)\n"
-      "FILEs may depend on declarations in earlier files.\n"
+      "FILEs may be schemas, or JSON files (conforming to preceding schema)\n"
       "FILEs after the -- must be binary flatbuffer format files.\n"
       "Output files are named using the base file name of the input,\n"
       "and written to the current directory or the path given by -o.\n"
@@ -183,7 +184,6 @@ int main(int argc, const char *argv[]) {
         binary_files_from = filenames.size();
       } else if(arg == "--proto") {
         opts.proto_mode = true;
-        any_generator = true;
       } else if(arg == "--schema") {
         schema_binary = true;
       } else if(arg == "-M") {
@@ -208,8 +208,12 @@ int main(int argc, const char *argv[]) {
 
   if (!filenames.size()) Error("missing input files", false, true);
 
-  if (!any_generator)
+  if (opts.proto_mode) {
+    if (any_generator)
+      Error("cannot generate code directly from .proto files", true);
+  } else if (!any_generator) {
     Error("no options: specify at least one generator.", true);
+  }
 
   // Now process the files:
   parser = new flatbuffers::Parser(opts);
@@ -248,6 +252,10 @@ int main(int argc, const char *argv[]) {
           }
         }
       } else {
+        // Check if file contains 0 bytes.
+        if (contents.length() != strlen(contents.c_str())) {
+          Error("input file appears to be binary: " + *file_it, true);
+        }
         if (flatbuffers::GetExtension(*file_it) == "fbs") {
           // If we're processing multiple schemas, make sure to start each
           // one from scratch. If it depends on previous schemas it must do
